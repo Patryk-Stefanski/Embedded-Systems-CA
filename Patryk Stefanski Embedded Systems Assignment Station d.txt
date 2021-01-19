@@ -1,0 +1,260 @@
+/*
+ * main.c
+ *
+ *  Created on: 2020 Dec 02 15:54:32
+ *  Author: Patryk Stefanski
+ *  Version: 4
+ */
+
+// The purpose of this code is to automate station D in FMS-200
+
+
+
+
+#include <DAVE.h>    //Declarations from DAVE Code Generation (includes SFR declaration)
+#include "xmc_gpio.h"
+/**
+
+ * @brief main() - Application entry point
+ *
+ * <b>Details of function</b><br>
+ * This routine is the application entry point. It is invoked by the device startup code. It is responsible for
+ * invoking the APP initialization dispatcher routine - DAVE_Init() and hosting the place-holder for user application
+ * code.
+ */
+
+
+
+
+#define Point2SEC 200000U
+     void LED_Toggle_everyPoint2Sec(void){
+    	DIGITAL_IO_ToggleOutput(&DIGITAL_IO_0);
+     }
+
+
+//Inputs
+#define GaugeChannelA 			P0_0
+#define GaugeChannelB 			P0_1
+#define EndFeedRun    			P0_2
+#define StartVerticalRun    	P0_2
+#define StartGaugeRun           P0_3
+#define StartHorizontalRun      P0_4
+#define EndHorizontalRun        P0_5
+#define CoverPresent            P0_6
+#define EndVerticalRun         	P0_7
+#define StartFeedRun			P0_8
+#define StartCycle  			P0_9
+#define StartButton  			P0_10
+#define StopButton       		P0_11
+#define EmergencyButton         P0_12
+#define EndGaugeRun 			P0_13
+
+
+//Outputs
+#define VerticalGaugeAdvance    P1_0
+#define CloseGripper			P1_1
+#define FeedAdvance     		P1_2
+#define VerticalAdvance         P1_3
+#define HorizontalReturn 		P1_4
+#define HorizontalAdvance       P1_5
+#define EndOfCycle              P1_6
+#define FaultyPiece      		P1_7
+
+
+unsigned int sensorCoverPresentActivated = 0;
+
+
+int currentState = -1 ; //default starting state
+int previousState = 0;  //previous state used to store state at which program was forcefully stopped
+
+int timer[10]; //array of integers used to program timer
+
+
+void TenthSecTick(void)  //Main timer
+ {
+		while(timer[1] == 1) //while timer is turned on
+		{
+			timer[2]++; //increment time
+			if(timer[2] > timer[3]) //if time elapsed is greater than expected
+			{
+				timer[4] = 1;
+			}
+		}
+
+		if (timer[5] == 1){  //resets timer and recorded value
+				timer[2]=0;
+				timer[4]=0;
+
+			}
+
+
+ }
+
+
+void setUpTimers(void)
+{
+
+
+	timer[1] = 0; //starts timer
+	timer[2] = 0; //record time elapsed
+	timer[3] = 5; //acceptable time set
+	timer[4] = 0; // recorded value  (if 1 then faulty piece)
+	timer[5] = 0 ; //resets timer and recorded value
+
+
+}
+void SysTick_Handler(void)
+{
+	TenthSecTick();
+}
+
+
+
+
+
+void initPortPins()
+{
+	XMC_GPIO_SetMode(GaugeChannelA ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(GaugeChannelB ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(EndFeedRun ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(StartVerticalRun ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(StartGaugeRun ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(EndGaugeRun ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(StartHorizontalRun ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(EndHorizontalRun ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(CoverPresent ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(EndeVerticalRun ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(StartFeedRun ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(StartCycle ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(StartButton ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(StopButton ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+	XMC_GPIO_SetMode(EmergencyButton ,XMC_GPIO_MODE_INPUT_PULL_DOWN );
+
+
+
+	XMC_GPIO_SetMode(VerticalGaugeAdvance ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+	XMC_GPIO_SetMode(CloseGripper ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+	XMC_GPIO_SetMode(OpenGripper ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+	XMC_GPIO_SetMode(FeedAdvance ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+	XMC_GPIO_SetMode(VerticalAdvance ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+	XMC_GPIO_SetMode(HorizontalReturn  ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+	XMC_GPIO_SetMode(HorizontalAdvance ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+	XMC_GPIO_SetMode(EndOfCycle ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+	XMC_GPIO_SetMode(FaultyPiece ,XMC_GPIO_MODE_OUTPUT_PUSH_PULL);
+
+}
+
+
+	int main(void)
+	{
+		initPortPins();
+
+
+
+	  while(1) //Infinite Loop
+	  {
+
+
+
+		if( XMC_GPIO_GetInput(StartCycle) == 1 && currentState==-1){ //Starts Cycle
+			XMC_GPIO_SetOutputLow(EndOfCycle);
+			currentState=0;
+		  }
+		if(  XMC_GPIO_GetInput(CoverPresent) == 1 && currentState==0 &&   XMC_GPIO_GetInput(StartFeedRun) == 1){ //if cover is ready then activate piston to feed the cover over to be picked up
+			XMC_GPIO_SetOutputHigh(FeedAdvance);
+			currentState= 1	;
+			}
+		if( XMC_GPIO_GetInput(CoverPresent) == 1 && currentState == 1 &&  XMC_GPIO_GetInput(EndFeedRun) == 1){ //if cover is in place to be picked up then retract piston
+			XMC_GPIO_SetOutputLow(FeedAdvance);
+			currentState=2;
+			}
+		if(currentState == 2 &&   XMC_GPIO_GetInput(StartVerticalRun) == 1 &&  XMC_GPIO_GetInput(startGaugeRun1)==1 &&  XMC_GPIO_GetInput(startHorizontalRun)==1){ //if  gripper is above lower height checking element and gripper
+			XMC_GPIO_SetOutputHigh(VerticalAdvance);
+			XMC_GPIO_SetOutputHigh(VerticalGaugeAdvance);
+			timer[5]=0;
+			currentState = 3;
+			}
+		if(currentState == 3  && XMC_GPIO_GetInput(endGaugeRun ==1) ){//if height checking element is at its lowest point start timer and retract height checking element
+				XMC_GPIO_SetOutputLow(VerticalGaugeAdvance);
+				timer[1]=1; //start timer
+				currentState = 3.5;
+				}
+		if(currentState == 3.5  &&  XMC_GPIO_GetInput(startGaugeRun==1) ){//if height checking element is back in its starting point end timer
+				timer[1]=0; //end timer
+				currentState = 4;
+			}
+		if(currentState == 4 && XMC_GPIO_GetInput(CoverPresent) == 1 &&  XMC_GPIO_GetInput(EndVerticalRun) == 1 && timer[4]==0 ){ //check timer and if as expected then close gripper and  on and reset timer and recorded value
+			XMC_GPIO_SetOutputHigh(CloseGrip);
+			XMC_GPIO_SetOutputLow(FaultyPiece);
+			timer[5]=1;
+			currentState = 5;
+			}
+		if(currentState == 4 && XMC_GPIO_GetInput(CoverPresent) == 1 &&  XMC_GPIO_GetInput(EndVerticalRun) == 1  && timer[4]==1 ){ //check timer and if greater than expected then set faulty piece to 1 and reset time and recorded value
+			//retract gripper to its starting position
+			XMC_GPIO_SetOutputHigh(FaultyPiece);
+			XMC_GPIO_SetOutputLow(VertcialAdvance);
+			timer[5]=1;
+			currentState = 2 ;
+			}
+
+		if(currentState == 5 ){ //retract gripper to its starting point
+			XMC_GPIO_SetOutputLow(VertcialAdvance);
+			timer[5]=0;//set reset timer to default value
+			currentState = 6;
+			}
+		if(currentState == 6  &&  XMC_GPIO_GetInput(StartVerticalRun)==1 &&  XMC_GPIO_GetInput(StartHorizontalRun)==1 ){//if gripper is in starting position then  start moving it horizontally to the pallet
+			XMC_GPIO_SetOutputHigh(HorizontalAdvance);
+			currentState = 7;
+			}
+		if(currentState == 7  &&  XMC_GPIO_GetInput(EndHorizontalRun) == 1){ //if  gripper is over pallet then stop moving it horizontally
+			XMC_GPIO_SetOutputLow(HorizontalAdvance);
+			currentState = 8;
+			}
+		if(currentState == 8 &&  faultyPiece==0 &&  XMC_GPIO_GetInput(StartVerticalRun) == 1 ){ //if the pallet is ready with a valid  piece then lower gripper
+			XMC_GPIO_SetOutputHigh(VerticalAdvance);
+			currentState = 9;
+			}
+		if(currentState == 9  &&  XMC_GPIO_GetInput(EndVerticalRun) == 1){ //if the gripper is in position to place cover then end stop lowering the gripper and open the grip to release cover
+			XMC_GPIO_SetOutputLow(CloseGrip);
+			currentState = 10;
+			}
+		if(currentState == 10){//retracts gripper
+			XMC_GPIO_SetOutputLow(verticalAdvance);
+			currentState = 11;
+			}
+		if(currentState == 11 &&  XMC_GPIO_GetInput(EndHorizontalRun)==1 &&  XMC_GPIO_GetInput(StartVerticalRun)==1 ){//if gripper is retracted fully  then start horizontal return
+			XMC_GPIO_SetOutputHigh(HorizontalReturn);
+			currentState = 12;
+			}
+		if(currentState == 12 &&  XMC_GPIO_GetInput(StartHorizontalRun)==1  ){//if  gripper is back in its  horizontal starting position then stop horizontal return
+			XMC_GPIO_SetOutputLow(HorizontalReturn);
+			currentState = 13;
+			}
+		if(currentState == 13 ){  // cycle is finished so start over again
+				XMC_GPIO_SetOutputHigh(EndOfCycle);
+				currentState = 0;
+			}
+		if(XMC_GPIO_GetInput(EmergencyButton) == 1 || XMC_GPIO_GetInput(StopButton) == 1){ //if emergency button or stop button is pressed stop everything
+			previousState=currentState;
+			currentState=13;
+			}
+		if(currentState==13 && XMC_GPIO_GetInput(StartButton) == 1){ // if start button is pressed start from last state and continue with the cycle
+			currentState=previousState;
+			}
+	}
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
